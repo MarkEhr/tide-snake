@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snake Game</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #222;
+        }
+
+        #game-container {
+            display: flex;
+            position: relative;
+            top: -50px;
+        }
+
+        canvas {
+            border: 1px solid #fff;
+            margin-bottom: 20px;
+        }
+
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 5px 2px;
+            cursor: pointer;
+            transition-duration: 0.4s;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        #collision-counters {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-right: 20px;
+        }
+
+        #collision-counters div {
+            margin: 5px;
+        }
+
+        #button-container {
+            margin-bottom: 56px;
+        }
+    </style>
+</head>
+<body>
+<div id="button-container">
+    <button id="joinGame">Join Game</button>
+    <button id="addBot">Add bot</button>
+    <button id="startGame">Start Game</button>
+    <button id="restartGame" disabled>Restart Game</button>
+
+</div>
+<div id="game-container">
+    <div id="collision-counters"></div> <!-- Add this element -->
+    <canvas id="game" width="600" height="600"></canvas>
+</div>
+<script src="./msgpack.min.js"></script>
+
+<script>
+    const canvas = document.getElementById('game');
+    const startGameBtn = document.getElementById('startGame');
+    const restartGameBtn = document.getElementById('restartGame');
+    const collisionCounters = document.getElementById('collision-counters');
+    const joinGameBtn = document.getElementById('joinGame')
+    const addBotBtn = document.getElementById('addBot')
+    const eatSound = new Audio('sounds/eat.wav');
+
+    const ctx = canvas.getContext('2d');
+    const tileSize = 10;
+
+    let playerId = null;
+    let gameState = {};
+
+    //let socket = new WebSocket('ws://2.tcp.ngrok.io:16424');
+     //let socket = new WebSocket('ws://44.233.249.228:8080');
+    let socket = new WebSocket('wss://snake.tide.company:8080');
+
+    socket.onopen = () => {
+        console.log('Connected to server');
+    };
+
+    socket.onmessage = async  (event) => {
+
+        //Convert Blob to array buffer
+        const arrayBuffer = await event.data.arrayBuffer();
+
+
+        const data = decodeMessage(arrayBuffer);
+
+        if(data.type === 'eat'){
+            if (data.playerId === playerId) {
+                eatSound.play();
+                return;
+            }
+        }
+
+        if (data.type === 'playerInfo' && playerId === null && !data.isBot) {
+
+            playerId = data.player.id;
+        } else {
+            gameState = data;
+            drawGame(data);
+        }
+
+        if (data.type === 'restart') {
+            playerId = null;
+        }
+
+
+
+
+        if (data.p && data.p.length >= 1) {
+            startGameBtn.disabled = false;
+        } else {
+            startGameBtn.disabled = true;
+        }
+
+        if (data.p && data.p.length >= 1) {
+            startGameBtn.disabled = false;
+            restartGameBtn.disabled = false;
+        } else {
+            startGameBtn.disabled = true;
+            restartGameBtn.disabled = true;
+        }
+    };
+
+    function drawGame(gameState) {
+        ctx.fillStyle = 'black';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        for (const player of gameState.p) {
+            const color= getHexColorById(player.i)
+            drawSnake(player.s,color );
+        }
+
+        ctx.fillStyle = 'red';
+        for (const food of gameState.f) { // Loop through all food items
+            ctx.fillRect(food.x, food.y, tileSize, tileSize);
+        }
+        updateCollisionCounters();
+    }
+
+    function updateCollisionCounters() {
+        collisionCounters.innerHTML = ''; // Clear previous counters
+
+        // Ordenar los jugadores por puntuación (score) de mayor a menor
+        const sortedPlayers = gameState.p.slice().sort((a, b) => b.sc - a.sc);
+
+        sortedPlayers.forEach((player) => {
+            const counter = document.createElement('div');
+            counter.style.color = getHexColorById(player.i);
+            counter.textContent = `Player ${player.i} - collisions ${player.s.c} - score ${player.sc} `;
+            collisionCounters.appendChild(counter);
+        });
+    }
+
+
+    function getHexColorById(id) {
+        switch (id){
+            case 0:
+                return '#ff59c8';
+            case 1:
+                return '#00FFFF';
+            case 2:
+                return '#77DD77';
+            case 3:
+                return '#FFFACD';
+            case 4:
+                return '#FF7F50';
+            case 5:
+                return '#7626ff';
+            case 6:
+                return '#FDE9AA';
+            case 7:
+                return '#FFFFFF';
+            case 8:
+                return '#FF7F50';
+            case 9:
+                return '#7626ff';
+            case 10:
+                return '#FDE9AA';
+            case 11:
+                return '#FFFFFF';
+        }
+
+        const letters = '0123456789ABCDEF';
+        let color = '#';
+        for (let i = 0; i < 6; i++) {
+            color += letters[Math.floor(Math.random() * 16)];
+        }
+        return color;
+    }
+
+    function drawSnake(snake, color) {
+        ctx.fillStyle = color;
+        for (const part of snake.b) {
+            ctx.fillRect(part.x, part.y, tileSize, tileSize);
+        }
+    }
+
+    function encodeMessage(message) {
+        return msgpack.encode(message).buffer;
+    }
+
+    function decodeMessage(data) {
+        return msgpack.decode(new Uint8Array(data), {codec: msgpack.createCodec()});
+    }
+
+    document.addEventListener('keydown', (event) => {
+        console.log(event.key)
+        if (
+            event.key === 'ArrowUp' ||
+            event.key === 'ArrowDown' ||
+            event.key === 'ArrowLeft' ||
+            event.key === 'ArrowRight'
+        ) {
+            socket.send(
+                encodeMessage({type: 'direction', key: event.key, player: playerId})
+            );
+        }
+    });
+
+    //Check if space is pressed
+    document.addEventListener('keydown', (event) => {
+        if (event.key === ' ') {
+            socket.send(encodeMessage({type: 'space-key', pressed:true, player: playerId}))
+        }
+    });
+
+    //Check if space is released
+    document.addEventListener('keyup', (event) => {
+        if (event.key === ' ') {
+            socket.send(encodeMessage({type: 'space-key', pressed:false, player: playerId}))
+        }
+    });
+
+
+    // Add event listener for "Join Game" button
+
+    joinGameBtn.addEventListener('click', () => {
+        if(!playerId) {
+            socket.send(encodeMessage({type: 'join', isBot: false}));
+        }
+    });
+
+
+    addBotBtn.addEventListener('click', () => {
+        socket.send(encodeMessage({type: 'join', isBot:true}));
+    });
+
+    startGameBtn.addEventListener('click', () => {
+        socket.send(encodeMessage({type: 'start'}));
+    });
+
+    restartGameBtn.addEventListener('click', () => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        socket.send(encodeMessage({type: 'restart', player: playerId}));
+    });
+
+
+</script>
+</body>
+</html>
